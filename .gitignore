@@ -1,0 +1,28 @@
+# Binaries
+free-model-router
+free-model-router.exe
+free-model-router-*
+*.test
+*.out
+*.exe
+
+# Build artifacts
+.cache/
+coverage.out
+coverage.html
+tool_support_cache.json
+score_cache.json
+
+# Environment
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

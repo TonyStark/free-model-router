@@ -1,0 +1,35 @@
+{
+  "global": {
+    "verify_tool_support": false,
+    "verify_timeout_seconds": 20,
+    "verify_concurrency": 1,
+    "model_cache_ttl_seconds": 300,
+    "timeout_seconds": 30,
+    "rate_limit_cooldown_seconds": 15,
+    "not_found_cooldown_seconds": 3600,
+    "max_concurrent_requests": 50,
+    "max_retries_per_request": 15,
+    "slow_request_threshold_ms": 8000,
+    "score_cache_file": "score_cache.json"
+  },
+  "enabled_providers": ["openrouter"],
+  "providers": {
+    "openrouter": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "priority_keywords": [],
+      "exclude_keywords": ["dolphin", "liquid", "arcee"]
+    },
+    "groq": {
+      "base_url": "https://api.groq.com/openai/v1"
+    },
+    "cerebras": {
+      "base_url": "https://api.cerebras.ai/v1"
+    },
+    "sambanova": {
+      "base_url": "https://api.sambanova.ai/v1"
+    },
+    "ollama": {
+      "base_url": "http://localhost:11434"
+    }
+  }
+}
