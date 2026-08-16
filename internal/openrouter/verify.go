@@ -128,7 +128,8 @@ func RunToolVerification(ctx context.Context, adapter *OpenRouterAdapter, regist
 				rows = append(rows, []string{logger.ColorYellow + "✗" + logger.ColorReset, r.model, logger.ColorYellow + "no tools" + logger.ColorReset, logger.ColorCyan + "fresh" + logger.ColorReset})
 			}
 		} else {
-			rows = append(rows, []string{logger.ColorGray + "?" + logger.ColorReset, r.model, logger.ColorGray + "deferred" + logger.ColorReset, logger.ColorGray + "timed out" + logger.ColorReset})
+			registry.Mark(r.model, false)
+			rows = append(rows, []string{logger.ColorYellow + "✗" + logger.ColorReset, r.model, logger.ColorYellow + "no tools (timeout)" + logger.ColorReset, logger.ColorCyan + "fresh" + logger.ColorReset})
 		}
 	}
 
