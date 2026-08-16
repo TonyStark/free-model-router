@@ -24,13 +24,20 @@ func GetPriority(model string) int {
 }
 
 func ScoreModel(model string) float64 {
+	cfg := config.Get()
 	sr := Default.SuccessRate(model)
 	avg := Default.AvgLatMs(model)
 	latScore := math.Max(0, 1.0-avg/30000.0)
 	if sr < 0 {
-		return 0.5 + 0.3*latScore
+		return cfg.Global.MetadataWeightNoHistory
 	}
-	return 0.6*sr + 0.3*latScore + 0.1
+	total := Default.TotalAttempts(model)
+	if total < int64(cfg.Global.MinModelAttemptsForConfidence) {
+		blend := float64(total) / float64(cfg.Global.MinModelAttemptsForConfidence)
+		return blend*(0.6*sr + 0.3*latScore + cfg.Global.MetadataWeightWithHistory) +
+			(1-blend)*cfg.Global.MetadataWeightNoHistory
+	}
+	return 0.6*sr + 0.3*latScore + cfg.Global.MetadataWeightWithHistory
 }
 
 func HasHistory(model string) bool { return Default.SuccessRate(model) >= 0 }

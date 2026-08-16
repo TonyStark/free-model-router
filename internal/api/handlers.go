@@ -16,6 +16,9 @@ import (
 	"free-model-router/internal/router"
 )
 
+// SharedHTTPClient is the shared HTTP client with connection pooling.
+var SharedHTTPClient *http.Client
+
 // Init sets the package-level globals for handler access.
 // Must be called before the server starts.
 var (
@@ -24,6 +27,13 @@ var (
 	ToolRegistry *or.ToolSupportRegistry
 	GetAdapters  func() []or.LLMAdapter
 )
+
+func httpClientWithTimeout(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: SharedHTTPClient.Transport,
+	}
+}
 
 func getModelsByProvider() map[string][]string {
 	mbp := make(map[string][]string)
@@ -42,11 +52,34 @@ func getModelsByProvider() map[string][]string {
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
+	// Probe upstream connectivity
+	upstreamOK := true
+	if SharedHTTPClient != nil {
+		resp, err := httpClientWithTimeout(5*time.Second).Get("https://openrouter.ai/api/v1/models")
+		if err != nil {
+			upstreamOK = false
+		} else {
+			resp.Body.Close()
+			if resp.StatusCode != 200 {
+				upstreamOK = false
+			}
+		}
+	}
+
+	status := "ok"
+	httpStatus := http.StatusOK
+	if !upstreamOK {
+		status = "degraded"
+		httpStatus = http.StatusServiceUnavailable
+	}
+
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(httpStatus)
 	json.NewEncoder(w).Encode(map[string]any{
-		"status":  "ok",
-		"metrics": met.Summary(),
-		"time":    time.Now().UTC().Format(time.RFC3339),
+		"status":   status,
+		"upstream": upstreamOK,
+		"metrics":  met.Summary(),
+		"time":     time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
@@ -66,10 +99,10 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 			"last_used":  s.LastUsed,
 		}
 	}
-	keyOut := make(map[string]map[string]any, len(AppMetrics.KeyStats))
-	for hint, ks := range AppMetrics.KeyStats {
-		keyOut[fmt.Sprintf("#%d_%s", ks.Number, hint)] = map[string]any{
-			"key_num":   ks.Number,
+	// Key stats: only show key number, not the hint (security)
+	keyOut := make(map[string]any, len(AppMetrics.KeyStats))
+	for _, ks := range AppMetrics.KeyStats {
+		keyOut[fmt.Sprintf("#%d", ks.Number)] = map[string]any{
 			"successes": ks.Successes,
 			"failures":  ks.Failures,
 		}
@@ -89,15 +122,17 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCooldowns(w http.ResponseWriter, r *http.Request) {
-	AppFailover.Mu.RLock()
+	AppFailover.Mu.Lock()
 	out := make(map[string]any)
 	now := time.Now().Unix()
 	for model, exp := range AppFailover.CooldownUntil {
 		if rem := exp - now; rem > 0 {
 			out[model] = map[string]any{"expires_in_seconds": rem}
+		} else {
+			delete(AppFailover.CooldownUntil, model)
 		}
 	}
-	AppFailover.Mu.RUnlock()
+	AppFailover.Mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
 }
@@ -140,8 +175,18 @@ func handleModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte(`{"error":"method not allowed"}`))
+		return
+	}
+
 	reqID := reqIDFromCtx(r.Context())
 	start := time.Now()
+
+	// Limit request body to 10MB
+	r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
 
 	var payload map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -165,11 +210,14 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		met.IncStreamRequests()
 	}
 
+	// Manual override or auto routing
 	var modelsByProvider map[string][]string
+	isManualOverride := false
 
 	if requestedModel != "auto" && requestedModel != "router/auto" && requestedModel != "" && !strings.Contains(requestedModel, "free-model-router") {
 		modelsByProvider = make(map[string][]string)
 		modelsByProvider["openrouter"] = []string{requestedModel}
+		isManualOverride = true
 	} else {
 		modelsByProvider = getModelsByProvider()
 	}
@@ -186,7 +234,9 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	if !anyAvailable {
+	// Manual override: if the requested model is on cooldown, still proceed —
+	// the failover handler will fall back to auto (free models only)
+	if !anyAvailable && !isManualOverride {
 		met.IncTotalErrors()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -194,8 +244,15 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Non-streaming
 	if !isStream {
 		res, model, hint, err := AppFailover.ExecuteNonStream(reqID, payload, modelsByProvider)
+		if err != nil && isManualOverride {
+			// Manual override failed — fall back to auto mode (free models ONLY)
+			logger.ReqWarn(reqID, "Manual override model %s failed, falling back to auto (free models only)", requestedModel)
+			autoModels := getModelsByProvider()
+			res, model, hint, err = AppFailover.ExecuteNonStream(reqID, payload, autoModels)
+		}
 		if err != nil {
 			met.IncTotalErrors()
 			logger.ReqError(reqID, "All attempts failed: %v", err)
@@ -212,6 +269,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Streaming
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -227,66 +285,87 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	tried := 0
 	var lastErr error
 
-	for _, am := range AppFailover.RankedModels(modelsByProvider) {
-		if tried >= budget {
-			logger.ReqWarn(reqID, "Retry budget exhausted (%d stream attempts)", tried)
-			break
-		}
-		if AppFailover.IsCoolingDown(am.Model) {
-			logger.ReqDebug(reqID, "Skip stream %s (cooldown %s)",
-				am.Model, AppFailover.CooldownRemaining(am.Model).Round(time.Second))
-			continue
-		}
+	streamModels := AppFailover.RankedModels(modelsByProvider)
 
-		tried++
-		hist := "(no history)"
-		if met.HasHistory(am.Model) {
-			hist = fmt.Sprintf("score:%.2f avg:%.0fms", met.ScoreModel(am.Model), met.AvgLatMs(am.Model))
-		}
-		logger.ReqDebug(reqID, "Stream attempt %d/%d → %s%s%s [%s]",
-			tried, budget, logger.ColorCyan, am.Model, logger.ColorReset, hist)
-
-		chunkChan := make(chan []byte, 64)
-		resultChan := make(chan or.StreamResult, 1)
-
-		am.Adapter.ChatCompletionStream(payload, am.Model, AppFailover.Timeout, chunkChan, resultChan)
-
-		slowDone := make(chan struct{})
-		go func(m string) {
-			select {
-			case <-time.After(slowThreshold):
-				logger.ReqWarn(reqID, "⚠ Slow stream >%s from %s%s%s", slowThreshold, logger.ColorBold, m, logger.ColorReset)
-			case <-slowDone:
+	executeStream := func(models []router.AdapterModel) bool {
+		for _, am := range models {
+			if tried >= budget {
+				logger.ReqWarn(reqID, "Retry budget exhausted (%d stream attempts)", tried)
+				return false
 			}
-		}(am.Model)
+			if AppFailover.IsCoolingDown(am.Model) {
+				logger.ReqDebug(reqID, "Skip stream %s (cooldown %s)",
+					am.Model, AppFailover.CooldownRemaining(am.Model).Round(time.Second))
+				continue
+			}
 
-		sentBytes := false
-		for chunk := range chunkChan {
-			w.Write(chunk)
-			flusher.Flush()
-			sentBytes = true
+			tried++
+			hist := "(no history)"
+			if met.HasHistory(am.Model) {
+				hist = fmt.Sprintf("score:%.2f avg:%.0fms", met.ScoreModel(am.Model), met.AvgLatMs(am.Model))
+			}
+			logger.ReqDebug(reqID, "Stream attempt %d/%d → %s%s%s [%s]",
+				tried, budget, logger.ColorCyan, am.Model, logger.ColorReset, hist)
+
+			chunkChan := make(chan []byte, 64)
+			resultChan := make(chan or.StreamResult, 1)
+
+			am.Adapter.ChatCompletionStream(payload, am.Model, AppFailover.Timeout, chunkChan, resultChan)
+
+			slowDone := make(chan struct{})
+			go func(m string) {
+				select {
+				case <-time.After(slowThreshold):
+					logger.ReqWarn(reqID, "⚠ Slow stream >%s from %s%s%s", slowThreshold, logger.ColorBold, m, logger.ColorReset)
+				case <-slowDone:
+				}
+			}(am.Model)
+
+			sentBytes := false
+			for chunk := range chunkChan {
+				w.Write(chunk)
+				flusher.Flush()
+				sentBytes = true
+			}
+			close(slowDone)
+
+			sr := <-resultChan
+			if sr.Err == nil {
+				met.IncTotalSuccesses()
+				met.RecordSuccess(am.Model, sr.Hint, time.Since(start).Milliseconds())
+				logger.ModelStatus(reqID, "OK", am.Model+" [stream]", sr.Hint)
+				logger.ReqDebug(reqID, "Stream done in %s", time.Since(start).Round(time.Millisecond))
+				return true
+			}
+			if sentBytes {
+				logger.ReqWarn(reqID, "Stream error after partial send from %s: %v", am.Model, sr.Err)
+				met.RecordSuccess(am.Model, sr.Hint, time.Since(start).Milliseconds())
+				return true
+			}
+
+			AppFailover.HandleProviderError(reqID, am.Model, sr.Hint, sr.Err)
+			lastErr = sr.Err
 		}
-		close(slowDone)
-
-		sr := <-resultChan
-		if sr.Err == nil || sentBytes {
-			met.IncTotalSuccesses()
-			met.RecordSuccess(am.Model, sr.Hint, time.Since(start).Milliseconds())
-			logger.ModelStatus(reqID, "OK", am.Model+" [stream]", sr.Hint)
-			logger.ReqDebug(reqID, "Stream done in %s", time.Since(start).Round(time.Millisecond))
-			return
-		}
-
-		AppFailover.HandleProviderError(reqID, am.Model, sr.Hint, sr.Err)
-		lastErr = sr.Err
+		return false
 	}
 
-	met.IncTotalErrors()
-	errMsg := "all providers failed"
-	if lastErr != nil {
-		errMsg = lastErr.Error()
+	if !executeStream(streamModels) {
+		// Manual override failed — fall back to auto mode (free models ONLY)
+		if isManualOverride {
+			logger.ReqWarn(reqID, "Manual override stream failed, falling back to auto (free models only)")
+			autoModels := AppFailover.RankedModels(getModelsByProvider())
+			if executeStream(autoModels) {
+				return // auto fallback succeeded
+			}
+		}
+		// All attempts failed
+		met.IncTotalErrors()
+		errMsg := "all providers failed"
+		if lastErr != nil {
+			errMsg = lastErr.Error()
+		}
+		logger.ReqError(reqID, "Stream exhausted: %s", errMsg)
+		fmt.Fprintf(w, "data: {\"error\": %q}\n\ndata: [DONE]\n\n", errMsg)
+		flusher.Flush()
 	}
-	logger.ReqError(reqID, "Stream exhausted: %s", errMsg)
-	fmt.Fprintf(w, "data: {\"error\": %q}\n\ndata: [DONE]\n\n", errMsg)
-	flusher.Flush()
 }

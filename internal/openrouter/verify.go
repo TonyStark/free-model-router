@@ -33,7 +33,7 @@ func VerifyToolSupport(ctx context.Context, adapter *OpenRouterAdapter, model st
 
 	result := make(chan *bool, 1)
 	go func() {
-		resp, err := adapter.ChatCompletionSingleKey(payload, model, time.Duration(timeoutSecs)*time.Second)
+		resp, err := adapter.ChatCompletionSingleKey(ctx, payload, model, time.Duration(timeoutSecs)*time.Second)
 		if err != nil {
 			if pe, ok := err.(*ProviderError); ok && (pe.Type == "NotFoundError" || pe.Type == "AuthError") {
 				f := false

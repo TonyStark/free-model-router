@@ -3,6 +3,7 @@ package openrouter
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,6 +36,7 @@ type OpenRouterAdapter struct {
 	KeyPool     *KeyPool
 	BaseURL     string
 	ModelRouter *ModelRouter
+	HTTPClient  *http.Client // shared client with connection pooling
 }
 
 func (a *OpenRouterAdapter) ProviderName() string { return "openrouter" }
@@ -49,6 +51,16 @@ func (a *OpenRouterAdapter) headers(apiKey string) http.Header {
 	h.Set("HTTP-Referer", "http://localhost")
 	h.Set("X-Title", "free-model-router-go")
 	return h
+}
+
+func (a *OpenRouterAdapter) httpClientWithTimeout(timeout time.Duration) *http.Client {
+	if a.HTTPClient != nil {
+		return &http.Client{
+			Timeout:   timeout,
+			Transport: a.HTTPClient.Transport,
+		}
+	}
+	return &http.Client{Timeout: timeout}
 }
 
 func (a *OpenRouterAdapter) parseStatus(resp *http.Response, hint string) error {
@@ -76,10 +88,13 @@ func (a *OpenRouterAdapter) ChatCompletion(payload map[string]any, model string,
 		p["stream"] = false
 		body, _ := json.Marshal(p)
 
-		req, _ := http.NewRequest("POST", a.BaseURL+"/chat/completions", bytes.NewBuffer(body))
+		req, reqErr := http.NewRequest("POST", a.BaseURL+"/chat/completions", bytes.NewBuffer(body))
+		if reqErr != nil {
+			return &ProviderError{"ProviderError", reqErr.Error()}
+		}
 		req.Header = a.headers(key)
 
-		resp, err := (&http.Client{Timeout: timeout}).Do(req)
+		resp, err := a.httpClientWithTimeout(timeout).Do(req)
 		if err != nil {
 			return &ProviderError{"TimeoutError", err.Error()}
 		}
@@ -105,10 +120,13 @@ func (a *OpenRouterAdapter) ChatCompletionStream(payload map[string]any, model s
 			p["stream"] = true
 			body, _ := json.Marshal(p)
 
-			req, _ := http.NewRequest("POST", a.BaseURL+"/chat/completions", bytes.NewBuffer(body))
+			req, reqErr := http.NewRequest("POST", a.BaseURL+"/chat/completions", bytes.NewBuffer(body))
+			if reqErr != nil {
+				return &ProviderError{"ProviderError", reqErr.Error()}
+			}
 			req.Header = a.headers(key)
 
-			resp, reqErr := (&http.Client{Timeout: timeout}).Do(req)
+			resp, reqErr := a.httpClientWithTimeout(timeout).Do(req)
 			if reqErr != nil {
 				return &ProviderError{"TimeoutError", reqErr.Error()}
 			}
@@ -120,6 +138,7 @@ func (a *OpenRouterAdapter) ChatCompletionStream(payload map[string]any, model s
 
 			usedHint = h
 			scanner := bufio.NewScanner(resp.Body)
+			scanner.Buffer(make([]byte, 0, 256*1024), 256*1024) // 256KB buffer for large SSE chunks
 			for scanner.Scan() {
 				line := scanner.Text()
 				if strings.HasPrefix(line, "data: ") {
@@ -140,7 +159,8 @@ func (a *OpenRouterAdapter) ChatCompletionStream(payload map[string]any, model s
 }
 
 // ChatCompletionSingleKey is used ONLY by verification probes.
-func (a *OpenRouterAdapter) ChatCompletionSingleKey(payload map[string]any, model string, timeout time.Duration) (map[string]any, error) {
+// persistent=false so probe 429s never contaminate the real key pool.
+func (a *OpenRouterAdapter) ChatCompletionSingleKey(ctx context.Context, payload map[string]any, model string, timeout time.Duration) (map[string]any, error) {
 	var result map[string]any
 
 	_, err := a.KeyPool.TryAllKeys(false, model, func(key, h string, keyNum int) error {
@@ -149,10 +169,13 @@ func (a *OpenRouterAdapter) ChatCompletionSingleKey(payload map[string]any, mode
 		p["stream"] = false
 		body, _ := json.Marshal(p)
 
-		req, _ := http.NewRequest("POST", a.BaseURL+"/chat/completions", bytes.NewBuffer(body))
+		req, reqErr := http.NewRequestWithContext(ctx, "POST", a.BaseURL+"/chat/completions", bytes.NewBuffer(body))
+		if reqErr != nil {
+			return &ProviderError{"ProviderError", reqErr.Error()}
+		}
 		req.Header = a.headers(key)
 
-		resp, err := (&http.Client{Timeout: timeout}).Do(req)
+		resp, err := a.httpClientWithTimeout(timeout).Do(req)
 		if err != nil {
 			return &ProviderError{"TimeoutError", err.Error()}
 		}

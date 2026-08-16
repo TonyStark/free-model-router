@@ -10,11 +10,12 @@ import (
 )
 
 // New creates and returns the fully-wired http.Handler.
-func New(appMetrics *met.Metrics, failover *router.FailoverRouter, toolReg *or.ToolSupportRegistry, getAdaptersFn func() []or.LLMAdapter) http.Handler {
+func New(appMetrics *met.Metrics, failover *router.FailoverRouter, toolReg *or.ToolSupportRegistry, getAdaptersFn func() []or.LLMAdapter, sharedHTTPClient *http.Client) http.Handler {
 	AppMetrics = appMetrics
 	AppFailover = failover
 	ToolRegistry = toolReg
 	GetAdapters = getAdaptersFn
+	SharedHTTPClient = sharedHTTPClient
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleHealth)
@@ -25,5 +26,18 @@ func New(appMetrics *met.Metrics, failover *router.FailoverRouter, toolReg *or.T
 
 	cfg := config.Get()
 	sem := make(chan struct{}, cfg.Global.MaxConcurrentRequests)
-	return loggingMiddleware(rateLimitMiddleware(sem)(mux))
+	return rateLimitMiddleware(sem)(corsMiddleware(loggingMiddleware(mux)))
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

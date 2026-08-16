@@ -135,6 +135,16 @@ func (m *Metrics) AvgLatMs(model string) float64 {
 	return float64(s.TotalLatMs) / float64(s.Successes)
 }
 
+func (m *Metrics) TotalAttempts(model string) int64 {
+	m.Mu.RLock()
+	defer m.Mu.RUnlock()
+	s, ok := m.ModelStats[model]
+	if !ok {
+		return 0
+	}
+	return s.Successes + s.Failures
+}
+
 func (m *Metrics) Summary() string {
 	return fmt.Sprintf("total=%d ok=%d err=%d active=%d streams=%d",
 		m.TotalRequests.Load(), m.TotalSuccesses.Load(),

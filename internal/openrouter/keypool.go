@@ -30,7 +30,7 @@ func NewKeyPool(keys []string) *KeyPool {
 
 func BuildHint(k string) string {
 	if len(k) <= 6 {
-		return k
+		return "…" + k
 	}
 	return "…" + k[len(k)-6:]
 }
@@ -95,4 +95,16 @@ func (kp *KeyPool) Next(model string) (key, hint string, keyNum int) {
 		}
 	}
 	return kp.keys[0], kp.hints[0], 1
+}
+
+// CleanExpired removes expired key cooldown entries.
+func (kp *KeyPool) CleanExpired() {
+	kp.mu.Lock()
+	defer kp.mu.Unlock()
+	now := time.Now().Unix()
+	for k, exp := range kp.keyCooldowns {
+		if now >= exp {
+			delete(kp.keyCooldowns, k)
+		}
+	}
 }

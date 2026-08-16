@@ -89,6 +89,13 @@ func loggingMiddleware(next http.Handler) http.Handler {
 func rateLimitMiddleware(sem chan struct{}) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip rate limiting for streaming chat completions — streams have their own
+			// timeout via the request context, and holding a semaphore slot for minutes
+			// would block all other requests including /health.
+			if r.URL.Path == "/v1/chat/completions" {
+				next.ServeHTTP(w, r)
+				return
+			}
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()

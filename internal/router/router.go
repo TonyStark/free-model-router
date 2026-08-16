@@ -63,6 +63,7 @@ func (fr *FailoverRouter) HandleProviderError(reqID, model, hint string, err err
 		metrics.RecordFailure(model, hint)
 	case "AuthError":
 		logger.ReqError(reqID, "Auth error on %s: %s", model, pe.Message)
+		fr.MarkCooldown(reqID, model, config.Get().Global.AuthCooldownSeconds)
 		metrics.RecordFailure(model, hint)
 	case "TimeoutError":
 		logger.ReqWarn(reqID, "Timeout on %s%s%s", logger.ColorBold, model, logger.ColorReset)
@@ -93,6 +94,10 @@ func (fr *FailoverRouter) RankedModels(modelsByProvider map[string][]string) []A
 		}
 		return metrics.ScoreModel(all[i].Model) > metrics.ScoreModel(all[j].Model)
 	})
+	cfg := config.Get()
+	if cfg.Global.TopModelPoolSize > 0 && len(all) > cfg.Global.TopModelPoolSize {
+		all = all[:cfg.Global.TopModelPoolSize]
+	}
 	return all
 }
 

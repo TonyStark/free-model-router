@@ -28,6 +28,7 @@ var (
 	toolRegistry      *or.ToolSupportRegistry
 	openRouterAdapter *or.OpenRouterAdapter
 	appMet            = met.New()
+	sharedHTTPClient  *http.Client
 )
 
 func buildOpenRouterAdapter(cfg config.Config) *or.OpenRouterAdapter {
@@ -51,6 +52,7 @@ func buildOpenRouterAdapter(cfg config.Config) *or.OpenRouterAdapter {
 		KeyPool:     or.NewKeyPool(keys),
 		BaseURL:     cfg.Providers["openrouter"].BaseURL,
 		ModelRouter: mr,
+		HTTPClient:  sharedHTTPClient,
 	}
 
 	logger.Info("OpenRouter: %s%d%s key(s) loaded", logger.ColorMagenta+logger.ColorBold, len(keys), logger.ColorReset)
@@ -92,6 +94,49 @@ func getAdapters() []or.LLMAdapter {
 	return cloudAdapters
 }
 
+func cleanupExpiredMaps(bgCtx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-bgCtx.Done():
+			return
+		case <-ticker.C:
+			now := time.Now().Unix()
+
+			// Clean keyCooldowns
+			adaptersMu.RLock()
+			if openRouterAdapter != nil {
+				openRouterAdapter.KeyPool.CleanExpired()
+			}
+			adaptersMu.RUnlock()
+
+			// Clean failover CooldownUntil
+			failover.Mu.Lock()
+			for k, exp := range failover.CooldownUntil {
+				if now >= exp {
+					delete(failover.CooldownUntil, k)
+				}
+			}
+			failover.Mu.Unlock()
+
+			// Clean ModelStats — remove models not used in 24h
+			appMet.Mu.Lock()
+			for k, s := range appMet.ModelStats {
+				if s.LastUsed > 0 && now-s.LastUsed > 86400 {
+					delete(appMet.ModelStats, k)
+				}
+			}
+			appMet.Mu.Unlock()
+
+			// Periodically persist score cache
+			cfg := config.Get()
+			scorePath := filepath.Join(cfg.Global.CacheDir, cfg.Global.ScoreCacheFile)
+			appMet.SaveScoreCache(scorePath)
+		}
+	}
+}
+
 func printModelTable(modelsByProvider map[string][]string) {
 	header := []string{
 		logger.ColorGray + "#" + logger.ColorReset,
@@ -107,17 +152,16 @@ func printModelTable(modelsByProvider map[string][]string) {
 	for provider, models := range modelsByProvider {
 		for _, m := range met.SortByScore(models) {
 			i++
-			scoreStr := logger.ColorGray + "–" + logger.ColorReset
+			s := met.ScoreModel(m)
+			c := logger.ColorGreen
+			if s < 0.5 {
+				c = logger.ColorRed
+			} else if s < 0.75 {
+				c = logger.ColorYellow
+			}
+			scoreStr := fmt.Sprintf("%s%.2f%s", c, s, logger.ColorReset)
 			latStr := logger.ColorGray + "–" + logger.ColorReset
 			if met.HasHistory(m) {
-				s := met.ScoreModel(m)
-				c := logger.ColorGreen
-				if s < 0.5 {
-					c = logger.ColorRed
-				} else if s < 0.75 {
-					c = logger.ColorYellow
-				}
-				scoreStr = fmt.Sprintf("%s%.2f%s", c, s, logger.ColorReset)
 				latStr = fmt.Sprintf("%.0fms", met.AvgLatMs(m))
 			}
 			toolStr := logger.ColorGray + "?" + logger.ColorReset
@@ -192,6 +236,15 @@ func main() {
 	scorePath := filepath.Join(cfg.Global.CacheDir, cfg.Global.ScoreCacheFile)
 	appMet.LoadScoreCache(scorePath)
 
+	// Shared HTTP transport for connection pooling
+	sharedHTTPClient = &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 20,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
+
 	var adapters []or.LLMAdapter
 	for _, p := range cfg.EnabledProviders {
 		if p == "openrouter" {
@@ -214,6 +267,8 @@ func main() {
 
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel()
+
+	go cleanupExpiredMaps(bgCtx)
 
 	verDone := make(chan struct{})
 	go func() {
@@ -250,7 +305,7 @@ func main() {
 		adaptersMu.RLock()
 		defer adaptersMu.RUnlock()
 		return cloudAdapters
-	})
+	}, sharedHTTPClient)
 
 	port := firstNonEmpty(*portFlag, os.Getenv("SERVER_PORT"), "4141")
 	host := firstNonEmpty(*hostFlag, os.Getenv("SERVER_HOST"), "0.0.0.0")
@@ -260,7 +315,7 @@ func main() {
 		Addr:         addr,
 		Handler:      handler,
 		ReadTimeout:  time.Duration(cfg.Global.TimeoutSeconds+5) * time.Second,
-		WriteTimeout: time.Duration(cfg.Global.TimeoutSeconds+15) * time.Second,
+		WriteTimeout: 0, // No write timeout — SSE streams can run indefinitely
 		IdleTimeout:  120 * time.Second,
 	}
 
