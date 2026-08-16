@@ -40,6 +40,7 @@ cross-build:
 	GOOS=darwin  GOARCH=amd64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BINARY)-darwin-amd64  ./cmd/freemodel/
 	GOOS=darwin  GOARCH=arm64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BINARY)-darwin-arm64  ./cmd/freemodel/
 	GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BINARY)-windows-amd64.exe ./cmd/freemodel/
+	GOOS=android GOARCH=arm64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BINARY)-android-arm64  ./cmd/freemodel/
 
 help:
 	@echo "Usage: make <target>"
@@ -54,4 +55,4 @@ help:
 	@echo "  vet          Run go vet"
 	@echo "  lint         Run staticcheck"
 	@echo "  clean        Remove build artifacts"
-	@echo "  cross-build  Cross-compile for all platforms"
+	@echo "  cross-build  Cross-compile for linux, darwin, windows, android"

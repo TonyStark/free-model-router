@@ -101,7 +101,10 @@ Cross-compile:
 ```bash
 GOOS=linux GOARCH=amd64 go build -o free-model-router-linux-amd64 ./cmd/freemodel/
 GOOS=darwin GOARCH=arm64 go build -o free-model-router-darwin-arm64 ./cmd/freemodel/
+GOOS=android GOARCH=arm64 go build -o free-model-router-android-arm64 ./cmd/freemodel/
 ```
+
+Or use `make cross-build` for all platforms (linux, darwin, windows, android).
 
 ## Run
 
