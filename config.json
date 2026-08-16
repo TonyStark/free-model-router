@@ -15,7 +15,8 @@
     "metadata_weight_no_history": 0.85,
     "metadata_weight_with_history": 0.35,
     "top_model_pool_size": 5,
-    "min_model_attempts_for_confidence": 8
+    "min_model_attempts_for_confidence": 8,
+    "allowed_models": []
   },
   "enabled_providers": ["openrouter"],
   "providers": {

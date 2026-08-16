@@ -22,10 +22,11 @@ var SharedHTTPClient *http.Client
 // Init sets the package-level globals for handler access.
 // Must be called before the server starts.
 var (
-	AppMetrics   *met.Metrics
-	AppFailover  *router.FailoverRouter
-	ToolRegistry *or.ToolSupportRegistry
-	GetAdapters  func() []or.LLMAdapter
+	AppMetrics      *met.Metrics
+	AppFailover     *router.FailoverRouter
+	ToolRegistry    *or.ToolSupportRegistry
+	GetAdapters     func() []or.LLMAdapter
+	CliAllowedModels []string // from -m flag, overrides config
 )
 
 func httpClientWithTimeout(timeout time.Duration) *http.Client {
@@ -33,6 +34,24 @@ func httpClientWithTimeout(timeout time.Duration) *http.Client {
 		Timeout:   timeout,
 		Transport: SharedHTTPClient.Transport,
 	}
+}
+
+func isModelAllowed(model string) bool {
+	// CLI flag takes precedence over config
+	allowed := CliAllowedModels
+	if len(allowed) == 0 {
+		cfg := config.Get()
+		allowed = cfg.Global.AllowedModels
+	}
+	if len(allowed) == 0 {
+		return true // no allowlist = all models allowed
+	}
+	for _, a := range allowed {
+		if strings.EqualFold(model, a) {
+			return true
+		}
+	}
+	return false
 }
 
 func getModelsByProvider() map[string][]string {
@@ -152,6 +171,9 @@ func handleModels(w http.ResponseWriter, r *http.Request) {
 			models = ToolRegistry.FilterSupported(models)
 		}
 		for _, m := range models {
+			if !isModelAllowed(m) {
+				continue
+			}
 			if _, ok := seen[m]; !ok {
 				seen[m] = map[string]any{
 					"id": m, "object": "model", "created": now,
@@ -215,6 +237,15 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	isManualOverride := false
 
 	if requestedModel != "auto" && requestedModel != "router/auto" && requestedModel != "" && !strings.Contains(requestedModel, "free-model-router") {
+		// Validate manual override against allowlist
+		if !isModelAllowed(requestedModel) {
+			met.IncTotalErrors()
+			logger.ReqWarn(reqID, "Model %s not in allowlist", requestedModel)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, `{"error":"model %q is not in the allowed models list"}`, requestedModel)
+			return
+		}
 		modelsByProvider = make(map[string][]string)
 		modelsByProvider["openrouter"] = []string{requestedModel}
 		isManualOverride = true

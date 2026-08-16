@@ -14,6 +14,7 @@ import (
 type ModelRouter struct {
 	BaseURL         string
 	ExcludeKeywords []string
+	AllowedModels   []string
 	CacheTTL        int
 	cachedModels    []string
 	cacheTime       int64
@@ -59,9 +60,23 @@ func (mr *ModelRouter) GetFreeModels() ([]string, error) {
 				break
 			}
 		}
-		if !excluded {
-			free = append(free, m.ID)
+		if excluded {
+			continue
 		}
+		// Allowlist filter: if set, only include models in the list
+		if len(mr.AllowedModels) > 0 {
+			allowed := false
+			for _, a := range mr.AllowedModels {
+				if strings.EqualFold(m.ID, a) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				continue
+			}
+		}
+		free = append(free, m.ID)
 	}
 
 	mr.mu.Lock()

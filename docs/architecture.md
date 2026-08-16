@@ -79,6 +79,7 @@ Key design decisions:
 | `metadata_weight_with_history` | `0.35` | Base score component for tested models |
 | `top_model_pool_size` | `5` | Limit failover to top N ranked models |
 | `min_model_attempts_for_confidence` | `8` | Blend toward no-history score until this many attempts |
+| `allowed_models` | `[]` | Restrict to specific models (empty = all free models allowed) |
 
 ### Environment Variables
 
@@ -94,20 +95,22 @@ Key design decisions:
 
 ```
 main()
-  ├── Parse flags (--debug, --port, --host)
+  ├── Parse flags (--debug, --port, --host, --models)
   ├── logger.Init()
   ├── config.SetReloadHook(rebuildAdapters)
   ├── config.LoadEnv()          // Read .env file (strips quotes, no overwrite)
   ├── config.Load()             // Read config.json
   ├── met.Default = appMet      // Set package-level metrics singleton
+  ├── Apply --models flag override to cliAllowedModels (persists across SIGHUP)
   ├── Build cache directories
   ├── Load score cache from disk
   ├── Build shared HTTP client (connection pooling)
   ├── Build initial adapters (openrouter key pool + model router)
+  │   └── ModelRouter.AllowedModels = cliAllowedModels or config allowed_models
   ├── Build FailoverRouter with adapters, timeouts, cooldowns
   │
   ├── goroutine 1: cleanupExpiredMaps()       // Purge expired cooldowns every 5min
-  ├── goroutine 2: RunToolVerification()      // Probe model tool support
+  ├── goroutine 2: RunToolVerification()      // Probe model tool support (only allowed models)
   ├── goroutine 3: WatchReload()              // Listen for SIGHUP
   ├── goroutine 4: printModelTable()          // Wait for verification, then print
   ├── goroutine 5 (debug): re-print model table every 5 minutes
@@ -141,6 +144,7 @@ Client → POST /v1/chat/completions
   │   ├── Limit request body to 10MB
   │   ├── Decode JSON body
   │   ├── Determine requested model (specific / "auto")
+  │   ├── Validate manual override against allowlist → 400 if not allowed
   │   ├── Build modelsByProvider map:
   │   │   ├── "auto"         → getModelsByProvider() (all models)
   │   │   ├── "model-id"     → single-entry map (manual override)
@@ -305,7 +309,7 @@ Mutex-guarded singleton with ANSI color escape codes. Levels: `INFO`, `WARN`, `E
 
 - **adapter.go**: `LLMAdapter` interface defines the contract for all providers. `OpenRouterAdapter` implements it with key-pool rotation, shared HTTP client (connection pooling), and SSE parsing (256KB scanner buffer). `ChatCompletionSingleKey` accepts `context.Context` for cancellation during verification probes.
 - **keypool.go**: `KeyPool` manages a list of API keys with per-model cooldown tracking. `TryAllKeys` iterates keys, skipping cooled ones, persisting rate-limit cooldowns. `Next` picks the first non-cooled key. `CleanExpired` purges expired cooldown entries. `BuildHint` always prefixes with `…` for consistent masking.
-- **models.go**: `ModelRouter` fetches `/models` from OpenRouter, filters to free models (`:free` suffix, zero pricing), excludes keyword-matched models, and caches with TTL.
+- **models.go**: `ModelRouter` fetches `/models` from OpenRouter, filters to free models (`:free` suffix, zero pricing), excludes keyword-matched models, applies allowlist filter if `allowed_models` is set, and caches with TTL.
 - **registry.go**: `ToolSupportRegistry` persists model→tool-support booleans to a JSON file. Used to skip models that don't support tool calls.
 - **verify.go**: Startup verification probes new models with a tool-call request. A model is marked as supporting tools if the API accepts the request without error (not just if it returns `tool_calls`). Timed-out models are cached as unsupported to avoid re-verification on every restart. Runs concurrently with configurable concurrency and timeout. Uses `context.Context` for cancellation.
 

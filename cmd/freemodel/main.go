@@ -29,6 +29,7 @@ var (
 	openRouterAdapter *or.OpenRouterAdapter
 	appMet            = met.New()
 	sharedHTTPClient  *http.Client
+	cliAllowedModels  []string // from -m flag, persists across SIGHUP reloads
 )
 
 func buildOpenRouterAdapter(cfg config.Config) *or.OpenRouterAdapter {
@@ -43,9 +44,15 @@ func buildOpenRouterAdapter(cfg config.Config) *or.OpenRouterAdapter {
 		logger.Warn("No OPENROUTER_API_KEYS set — requests will fail auth")
 	}
 
+	allowedModels := cfg.Global.AllowedModels
+	if len(cliAllowedModels) > 0 {
+		allowedModels = cliAllowedModels
+	}
+
 	mr := &or.ModelRouter{
 		BaseURL:         cfg.Providers["openrouter"].BaseURL,
 		ExcludeKeywords: cfg.Providers["openrouter"].ExcludeKeywords,
+		AllowedModels:   allowedModels,
 		CacheTTL:        cfg.Global.ModelCacheTTLSeconds,
 	}
 	a := &or.OpenRouterAdapter{
@@ -217,6 +224,7 @@ func main() {
 	debugFlag := flag.Bool("debug", false, "Enable verbose debug logging")
 	portFlag := flag.String("port", "", "Override SERVER_PORT")
 	hostFlag := flag.String("host", "", "Override SERVER_HOST")
+	modelsFlag := flag.String("models", "", "Comma-separated list of allowed models (overrides config)")
 	flag.Parse()
 
 	logger.Init(*debugFlag)
@@ -230,6 +238,21 @@ func main() {
 	met.Default = appMet
 
 	cfg := config.Get()
+
+	// -models flag overrides config allowed_models
+	if *modelsFlag != "" {
+		for _, m := range strings.Split(*modelsFlag, ",") {
+			if clean := strings.TrimSpace(m); clean != "" {
+				cliAllowedModels = append(cliAllowedModels, clean)
+			}
+		}
+		logger.Info("Model allowlist from -m flag: %d model(s)", len(cliAllowedModels))
+	}
+	if len(cliAllowedModels) > 0 {
+		logger.Info("Restricted to %d allowed model(s) (from -m flag)", len(cliAllowedModels))
+	} else if len(cfg.Global.AllowedModels) > 0 {
+		logger.Info("Restricted to %d allowed model(s) (from config)", len(cfg.Global.AllowedModels))
+	}
 	os.MkdirAll(cfg.Global.CacheDir, 0755)
 	toolRegistry = or.NewToolSupportRegistry(filepath.Join(cfg.Global.CacheDir, "tool_support_cache.json"))
 
@@ -301,6 +324,7 @@ func main() {
 		}()
 	}
 
+	api.CliAllowedModels = cliAllowedModels
 	handler := api.New(appMet, failover, toolRegistry, func() []or.LLMAdapter {
 		adaptersMu.RLock()
 		defer adaptersMu.RUnlock()

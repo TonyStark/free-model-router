@@ -29,8 +29,9 @@ type GlobalConfig struct {
 	ScoreCacheFile               string  `json:"score_cache_file"`
 	MetadataWeightNoHistory      float64 `json:"metadata_weight_no_history"`
 	MetadataWeightWithHistory    float64 `json:"metadata_weight_with_history"`
-	TopModelPoolSize             int     `json:"top_model_pool_size"`
-	MinModelAttemptsForConfidence int    `json:"min_model_attempts_for_confidence"`
+	TopModelPoolSize              int      `json:"top_model_pool_size"`
+	MinModelAttemptsForConfidence int      `json:"min_model_attempts_for_confidence"`
+	AllowedModels                 []string `json:"allowed_models"`
 }
 
 type ProviderConfig struct {

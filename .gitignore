@@ -23,6 +23,5 @@ score_cache.json
 *.swo
 *~
 
-# OS
-.DS_Store
-Thumbs.db
+# Documentation
+MODELS.md

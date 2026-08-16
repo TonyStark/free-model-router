@@ -72,6 +72,7 @@ go build -o free-model-router ./cmd/freemodel/
 | `global.metadata_weight_with_history` | float | `0.35` | Base score component for models with history |
 | `global.top_model_pool_size` | int | `5` | Max models to consider per request (0 = unlimited) |
 | `global.min_model_attempts_for_confidence` | int | `8` | Attempts before full confidence in score (blending below this) |
+| `global.allowed_models` | [string] | `[]` | Restrict to specific models (empty = all free models allowed) |
 | `enabled_providers` | [string] | `["openrouter"]` | Providers to activate |
 | `providers.<name>.base_url` | string | — | Base URL for the provider API |
 | `providers.<name>.priority_keywords` | [string] | — | Models matching these get priority routing |
@@ -113,6 +114,9 @@ GOOS=darwin GOARCH=arm64 go build -o free-model-router-darwin-arm64 ./cmd/freemo
 
 # Override port/host
 ./free-model-router -port 8080 -host 127.0.0.1
+
+# Restrict to specific models only
+./free-model-router --models "dots-studio/dots-3-note-preview:free,nvidia/nemotron-3.5-lightning:free"
 ```
 
 ## API Endpoints
@@ -135,7 +139,7 @@ Per-model and per-key statistics.
 
 ### `GET /v1/models`
 
-OpenAI-compatible model listing. Models are sorted by score descending. Returns `auto`, `free-model-router/auto`, and all fetched models.
+OpenAI-compatible model listing. Models are sorted by score descending. Returns `auto`, `free-model-router/auto`, and all fetched models. If `allowed_models` is set (via `-m` flag or config), only allowed models are listed.
 
 ### `POST /v1/chat/completions`
 
@@ -160,8 +164,8 @@ Direct passthrough of the upstream provider's response.
 SSE stream of chunks forwarded from the upstream provider. On error, falls through to the next model mid-stream.
 
 Supported model values:
-- `"auto"` or `"free-model-router/auto"` — Route across all available models
-- `"model-id"` — Use exactly that model (no failover to different IDs)
+- `"auto"` or `"free-model-router/auto"` — Route across all available models (respecting allowlist)
+- `"model-id"` — Use exactly that model (must be in allowlist if set)
 - `"openrouter/model-id"` — OpenRouter-prefixed identifier
 
 ## Examples

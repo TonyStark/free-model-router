@@ -52,8 +52,9 @@ func TestVerifyToolSupportWithoutTools(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if *result {
-		t.Error("expected supported=false (no tool_calls)")
+	// Acceptance-based: 200 OK without error = model supports tools
+	if !*result {
+		t.Error("expected supported=true (API accepted tools param without error)")
 	}
 }
 
