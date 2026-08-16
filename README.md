@@ -6,14 +6,19 @@ A production-grade Go HTTP server that routes chat completion requests to free O
 
 - **Multi-key rotation** — Distributes requests across multiple API keys; falls through on rate limits
 - **Intelligent failover** — Ranks models by success rate and latency; skips cooling-down models
-- **Per-model scoring** — Scores models using `0.6 × success_rate + 0.3 × latency_score + 0.1 × base`
-- **Model cooldowns** — Applies cooldowns per-model on 404/rate-limit errors; configurable duration per error type
+- **Config-driven scoring** — Blended score formula with tunable weights and confidence blending for new models
+- **Model cooldowns** — Per-model cooldowns on auth/not-found/rate-limit errors with configurable durations
+- **Auth error cooldown** — Auto-cools models when API key authentication fails (`auth_cooldown_seconds`)
 - **Tool support verification** — Probes new models with a tool call to build a persisted support cache
 - **Graceful shutdown** — Drains active requests, persists score/tool caches, then exits
 - **Hot-reload** — `SIGHUP` reloads `config.json` and rebuilds adapters without downtime
 - **Streaming** — SSE streaming with per-chunk forwarding and stream-level failover
 - **Comprehensive metrics** — Per-model success/failure/latency, per-key stats, and active-request tracking
-- **Rate-limit middleware** — Enforces `max_concurrent_requests` with HTTP 429 responses
+- **Rate-limit middleware** — Enforces `max_concurrent_requests` with HTTP 429 responses (skips streaming)
+- **CORS middleware** — Configurable cross-origin request handling
+- **Health check** — Upstream connectivity probe with degraded status fallback
+- **Request body limit** — 10MB max request body via `MaxBytesReader`
+- **Connection pooling** — Shared HTTP client with 100 max connections, 90s idle timeout
 
 ## Architecture
 
@@ -52,6 +57,7 @@ go build -o free-model-router ./cmd/freemodel/
 | `global.timeout_seconds` | float | `30` | HTTP request timeout per provider call |
 | `global.rate_limit_cooldown_seconds` | float | `60` | Cooldown duration after a 429 response |
 | `global.not_found_cooldown_seconds` | float | `3600` | Cooldown duration after a 404 |
+| `global.auth_cooldown_seconds` | float | `600` | Cooldown duration after an authentication error |
 | `global.max_concurrent_requests` | int | `50` | Max simultaneous requests (429 beyond this) |
 | `global.max_retries_per_request` | int | `3` | Max model attempts per user request |
 | `global.model_cache_ttl_seconds` | int | `300` | TTL for the model list fetched from OpenRouter |
@@ -62,6 +68,10 @@ go build -o free-model-router ./cmd/freemodel/
 | `global.score_cache_file` | string | `"score_cache.json"` | File name inside `cache_dir` |
 | `global.shutdown_timeout_seconds` | int | `20` | Graceful shutdown drain timeout |
 | `global.cache_dir` | string | `".cache"` | Directory for cache files |
+| `global.metadata_weight_no_history` | float | `0.85` | Base score for untested models (no history) |
+| `global.metadata_weight_with_history` | float | `0.35` | Base score component for models with history |
+| `global.top_model_pool_size` | int | `5` | Max models to consider per request (0 = unlimited) |
+| `global.min_model_attempts_for_confidence` | int | `8` | Attempts before full confidence in score (blending below this) |
 | `enabled_providers` | [string] | `["openrouter"]` | Providers to activate |
 | `providers.<name>.base_url` | string | — | Base URL for the provider API |
 | `providers.<name>.priority_keywords` | [string] | — | Models matching these get priority routing |
