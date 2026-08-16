@@ -3,9 +3,14 @@ package metrics
 import (
 	"os"
 	"testing"
+
+	"free-model-router/internal/config"
+	"free-model-router/internal/logger"
 )
 
 func TestMain(m *testing.M) {
+	logger.Init(false)
+	config.Load()
 	Default = New()
 	os.Exit(m.Run())
 }

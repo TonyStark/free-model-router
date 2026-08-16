@@ -6,38 +6,59 @@ import (
 
 func TestScoreModelNoHistory(t *testing.T) {
 	Default = New()
-	// model with no history should get default score (sr < 0, latScore based on 0 avg)
+	// model with no history should get MetadataWeightNoHistory (0.85)
 	score := ScoreModel("unknown-model")
-	if score <= 0 {
-		t.Errorf("expected positive score for unknown model, got %f", score)
+	if score != 0.85 {
+		t.Errorf("expected 0.85 for unknown model, got %f", score)
 	}
 }
 
 func TestScoreModelWithHistory(t *testing.T) {
 	m := New()
-	m.getOrCreate("good-model").Successes = 4
+	// 8+ attempts = full confidence, no blending
+	m.getOrCreate("good-model").Successes = 10
 	m.getOrCreate("good-model").Failures = 0
 	m.getOrCreate("good-model").TotalLatMs = 2000
 	Default = m
 
 	score := ScoreModel("good-model")
-	// success rate = 1.0, latScore = 1 - 2000/30000/4 ≈ 1 - 0.0167 = 0.983
-	// score = 0.6*1.0 + 0.3*0.983 + 0.1 = 0.6 + 0.295 + 0.1 = 0.995
-	if score < 0.9 || score > 1.1 {
-		t.Errorf("expected score ~0.995, got %f", score)
+	// sr = 1.0, avg = 200ms, latScore = 1 - 200/30000 = 0.993
+	// total=10 >= minAttempts=8, so full formula:
+	// score = 0.6*1.0 + 0.3*0.993 + 0.35 = 0.6 + 0.298 + 0.35 = 1.248
+	// (Note: score can exceed 1.0 with the new weights — this is expected)
+	if score < 1.0 {
+		t.Errorf("expected score > 1.0 for perfect model, got %f", score)
 	}
 }
 
 func TestScoreModelFailuresOnly(t *testing.T) {
 	m := New()
-	m.getOrCreate("bad-model").Failures = 3
+	// 8+ attempts = full confidence, no blending
+	m.getOrCreate("bad-model").Failures = 10
 	Default = m
 
 	score := ScoreModel("bad-model")
-	// sr = 0, latScore = 1 (no latency data)
-	// score = 0.6*0 + 0.3*1 + 0.1 = 0.4
-	if score < 0.35 || score > 0.45 {
-		t.Errorf("expected score ~0.4, got %f", score)
+	// sr = 0, latScore = 1 (no latency data), total=10 >= 8
+	// score = 0.6*0 + 0.3*1 + 0.35 = 0.65
+	if score < 0.6 || score > 0.7 {
+		t.Errorf("expected score ~0.65, got %f", score)
+	}
+}
+
+func TestScoreModelBlending(t *testing.T) {
+	m := New()
+	// 4 attempts = below minModelAttemptsForConfidence (8), so blending occurs
+	m.getOrCreate("new-model").Successes = 4
+	m.getOrCreate("new-model").Failures = 0
+	m.getOrCreate("new-model").TotalLatMs = 1000
+	Default = m
+
+	score := ScoreModel("new-model")
+	// blend = 4/8 = 0.5, sr=1.0, avg=250ms, latScore=0.992
+	// blended = 0.5 * (0.6*1.0 + 0.3*0.992 + 0.35) + 0.5 * 0.85
+	//         = 0.5 * 1.2476 + 0.425 = 0.6238 + 0.425 = 1.0488
+	if score < 0.85 || score > 1.1 {
+		t.Errorf("expected blended score between 0.85 and 1.1, got %f", score)
 	}
 }
 

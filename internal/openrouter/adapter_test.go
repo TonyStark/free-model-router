@@ -1,6 +1,7 @@
 package openrouter
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -210,7 +211,7 @@ func TestChatCompletionSingleKeySuccess(t *testing.T) {
 	defer srv.Close()
 
 	adapter := newTestAdapter(srv)
-	result, err := adapter.ChatCompletionSingleKey(map[string]any{}, "verify-model", 5*time.Second)
+	result, err := adapter.ChatCompletionSingleKey(context.Background(), map[string]any{}, "verify-model", 5*time.Second)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -227,7 +228,7 @@ func TestChatCompletionSingleKeyError(t *testing.T) {
 	defer srv.Close()
 
 	adapter := newTestAdapter(srv)
-	_, err := adapter.ChatCompletionSingleKey(map[string]any{}, "auth-model", 5*time.Second)
+	_, err := adapter.ChatCompletionSingleKey(context.Background(), map[string]any{}, "auth-model", 5*time.Second)
 
 	if err == nil {
 		t.Fatal("expected error for 401")
@@ -268,7 +269,7 @@ func TestChatCompletionSingleKeyNoPersistentCooldown(t *testing.T) {
 	defer srv.Close()
 
 	adapter := newTestAdapter(srv)
-	adapter.ChatCompletionSingleKey(map[string]any{}, "non-persist-model", 5*time.Second)
+	adapter.ChatCompletionSingleKey(context.Background(), map[string]any{}, "non-persist-model", 5*time.Second)
 
 	// TryAllKeys with persistent=false should NOT set cooldown
 	// So calling the same model again should still work

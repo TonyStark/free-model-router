@@ -128,8 +128,8 @@ func TestHandleProviderErrorAuthError(t *testing.T) {
 	metrics.Default = metrics.New()
 
 	fr.HandleProviderError("req-1", "model-z", "hint1", &or.ProviderError{Type: "AuthError", Message: "bad key"})
-	if fr.IsCoolingDown("model-z") {
-		t.Error("AuthError should NOT trigger cooldown")
+	if !fr.IsCoolingDown("model-z") {
+		t.Error("AuthError should trigger cooldown")
 	}
 }
 

@@ -31,7 +31,7 @@ func TestNewReturnsHandler(t *testing.T) {
 	tr := or.NewToolSupportRegistry("")
 	getAdapters := func() []or.LLMAdapter { return nil }
 
-	handler := New(m, fr, tr, getAdapters)
+	handler := New(m, fr, tr, getAdapters, &http.Client{})
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
 	}
@@ -77,7 +77,7 @@ func TestNewNoNilGlobals(t *testing.T) {
 		return []or.LLMAdapter{&mockAdapter{provider: "test", models: []string{"test-model:free"}}}
 	}
 
-	_ = New(m, fr, tr, getAdapters)
+	_ = New(m, fr, tr, getAdapters, &http.Client{})
 
 	if AppMetrics == nil {
 		t.Error("AppMetrics should not be nil after New()")
@@ -167,7 +167,7 @@ func TestHealthEndpointJson(t *testing.T) {
 		GetAdapters = saveGetAdapters
 	}()
 
-	handler := New(met.New(), &router.FailoverRouter{CooldownUntil: make(map[string]int64)}, or.NewToolSupportRegistry(""), func() []or.LLMAdapter { return nil })
+	handler := New(met.New(), &router.FailoverRouter{CooldownUntil: make(map[string]int64)}, or.NewToolSupportRegistry(""), func() []or.LLMAdapter { return nil }, &http.Client{})
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/health", nil)

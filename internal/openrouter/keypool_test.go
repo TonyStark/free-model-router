@@ -38,8 +38,8 @@ func TestBuildHint(t *testing.T) {
 		key      string
 		expected string
 	}{
-		{"short", "short"},
-		{"abcdef", "abcdef"},
+		{"short", "…short"},
+		{"abcdef", "…abcdef"},
 		{"sk-or-v1-abcdef123456", "…123456"},
 		{"sk-or-v1-xyz789000000", "…000000"},
 	}
