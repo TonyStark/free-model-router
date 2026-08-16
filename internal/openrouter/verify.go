@@ -49,9 +49,9 @@ func VerifyToolSupport(ctx context.Context, adapter *OpenRouterAdapter, model st
 			result <- &f
 			return
 		}
-		msg, _ := choices[0].(map[string]any)["message"].(map[string]any)
-		_, hasTool := msg["tool_calls"]
-		result <- &hasTool
+		// If the API accepted the tools parameter and returned a valid response,
+		// the model supports tools — regardless of whether it used them.
+		result <- &[]bool{true}[0]
 	}()
 
 	select {

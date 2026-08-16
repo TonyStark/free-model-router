@@ -1,7 +1,7 @@
 {
   "global": {
     "verify_tool_support": true,
-    "verify_timeout_seconds": 20,
+    "verify_timeout_seconds": 30,
     "verify_concurrency": 1,
     "model_cache_ttl_seconds": 300,
     "timeout_seconds": 30,

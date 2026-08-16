@@ -64,15 +64,15 @@ Key design decisions:
 | Key | Default | Description |
 |-----|---------|-------------|
 | `verify_tool_support` | `true` | Probe new models for tool-call support at startup |
-| `verify_timeout_seconds` | `20` | Timeout per verification probe |
-| `verify_concurrency` | `1` | Parallel verification probes |
+| `verify_timeout_seconds` | `30` | Timeout per verification probe |
+| `verify_concurrency` | `2` | Parallel verification probes |
 | `model_cache_ttl_seconds` | `300` | How long to cache the model list |
 | `timeout_seconds` | `30` | Per-request timeout for LLM calls |
-| `rate_limit_cooldown_seconds` | `15` | Cooldown after 429 (key-level) |
+| `rate_limit_cooldown_seconds` | `60` | Cooldown after 429 (key-level) |
 | `not_found_cooldown_seconds` | `3600` | Cooldown after 404 (model-level) |
 | `auth_cooldown_seconds` | `600` | Cooldown after 401 auth error |
 | `max_concurrent_requests` | `50` | Semaphore limit for non-streaming requests |
-| `max_retries_per_request` | `15` | Max models attempted per request |
+| `max_retries_per_request` | `3` | Max models attempted per request |
 | `slow_request_threshold_ms` | `8000` | Log warning if response exceeds this |
 | `score_cache_file` | `"score_cache.json"` | Filename for persisted scores |
 | `metadata_weight_no_history` | `0.85` | Score for untested models (higher = tried sooner) |
@@ -307,7 +307,7 @@ Mutex-guarded singleton with ANSI color escape codes. Levels: `INFO`, `WARN`, `E
 - **keypool.go**: `KeyPool` manages a list of API keys with per-model cooldown tracking. `TryAllKeys` iterates keys, skipping cooled ones, persisting rate-limit cooldowns. `Next` picks the first non-cooled key. `CleanExpired` purges expired cooldown entries. `BuildHint` always prefixes with `…` for consistent masking.
 - **models.go**: `ModelRouter` fetches `/models` from OpenRouter, filters to free models (`:free` suffix, zero pricing), excludes keyword-matched models, and caches with TTL.
 - **registry.go**: `ToolSupportRegistry` persists model→tool-support booleans to a JSON file. Used to skip models that don't support tool calls.
-- **verify.go**: Startup verification probes new models with a tool-call request to determine tool support. Runs concurrently with configurable concurrency and timeout. Uses `context.Context` for cancellation.
+- **verify.go**: Startup verification probes new models with a tool-call request. A model is marked as supporting tools if the API accepts the request without error (not just if it returns `tool_calls`). Timed-out models are cached as unsupported to avoid re-verification on every restart. Runs concurrently with configurable concurrency and timeout. Uses `context.Context` for cancellation.
 
 ### `internal/router`
 

@@ -62,7 +62,7 @@ go build -o free-model-router ./cmd/freemodel/
 | `global.max_retries_per_request` | int | `3` | Max model attempts per user request |
 | `global.model_cache_ttl_seconds` | int | `300` | TTL for the model list fetched from OpenRouter |
 | `global.verify_tool_support` | bool | `true` | Enable tool-call probing at startup |
-| `global.verify_timeout_seconds` | float | `20` | Per-model probe timeout |
+| `global.verify_timeout_seconds` | float | `30` | Per-model probe timeout |
 | `global.verify_concurrency` | int | `2` | Max concurrent probe requests |
 | `global.slow_request_threshold_ms` | int | `8000` | Log a warning if a request exceeds this |
 | `global.score_cache_file` | string | `"score_cache.json"` | File name inside `cache_dir` |

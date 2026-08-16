@@ -58,7 +58,7 @@ func defaults() Config {
 	return Config{
 		Global: GlobalConfig{
 			VerifyToolSupport:            true,
-			VerifyTimeoutSeconds:         20.0,
+			VerifyTimeoutSeconds:         30.0,
 			VerifyConcurrency:            2,
 			ModelCacheTTLSeconds:         300,
 			TimeoutSeconds:               30.0,
