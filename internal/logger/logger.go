@@ -20,8 +20,9 @@ const (
 )
 
 type Logger struct {
-	debug bool
-	mu    sync.Mutex
+	debug  bool
+	silent bool
+	mu     sync.Mutex
 }
 
 var l *Logger
@@ -30,9 +31,21 @@ func Init(debug bool) {
 	l = &Logger{debug: debug}
 }
 
+func SetSilent(silent bool) {
+	if l == nil {
+		l = &Logger{}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.silent = silent
+}
+
 func (l *Logger) Emit(level, color, reqID, format string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.silent {
+		return
+	}
 	ts := time.Now().Format("2006-01-02 15:04:05.000")
 	msg := fmt.Sprintf(format, args...)
 	rid := ""
@@ -93,6 +106,9 @@ func ModelStatus(reqID, status, model, keyHint string) {
 func Banner(title string, header []string, rows [][]string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.silent {
+		return
+	}
 
 	allRows := rows
 	if len(header) > 0 {

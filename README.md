@@ -121,8 +121,14 @@ Or use `make cross-build` for all platforms (linux, darwin, windows, android).
 # Restrict to specific models only
 ./free-model-router --models "dots-studio/dots-3-note-preview:free,nvidia/nemotron-3.5-lightning:free"
 
+# Silent mode (no output)
+./free-model-router -s
+
 # Run as daemon (background)
 ./free-model-router -daemon start
+
+# Silent daemon
+./free-model-router -s -daemon start
 
 # Check daemon status
 ./free-model-router -daemon status

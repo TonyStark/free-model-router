@@ -270,10 +270,14 @@ func main() {
 	portFlag := flag.String("port", "", "Override SERVER_PORT")
 	hostFlag := flag.String("host", "", "Override SERVER_HOST")
 	modelsFlag := flag.String("models", "", "Comma-separated list of allowed models (overrides config)")
+	silentFlag := flag.Bool("s", false, "Suppress all output (silent mode)")
 	flag.Parse()
 
 	logger.Init(*debugFlag)
-	if *debugFlag {
+	if *silentFlag {
+		logger.SetSilent(true)
+	}
+	if *debugFlag && !*silentFlag {
 		logger.Debug("Debug mode %sENABLED%s", logger.ColorBold, logger.ColorReset)
 	}
 
@@ -351,10 +355,12 @@ func main() {
 		case <-time.After(time.Duration(cfg.Global.VerifyTimeoutSeconds+15) * time.Second):
 			logger.Warn("Verification timed out — printing model table with partial results")
 		}
-		printModelTable(getAdaptersMap())
+		if !*silentFlag {
+			printModelTable(getAdaptersMap())
+		}
 	}()
 
-	if *debugFlag {
+	if *debugFlag && !*silentFlag {
 		go func() {
 			ticker := time.NewTicker(5 * time.Minute)
 			defer ticker.Stop()
