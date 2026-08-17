@@ -15,6 +15,7 @@ import (
 
 	"free-model-router/internal/api"
 	"free-model-router/internal/config"
+	"free-model-router/internal/daemon"
 	"free-model-router/internal/logger"
 	met "free-model-router/internal/metrics"
 	or "free-model-router/internal/openrouter"
@@ -221,6 +222,50 @@ func firstNonEmpty(vals ...string) string {
 }
 
 func main() {
+	// Handle -daemon before flag.Parse()
+	for i, arg := range os.Args[1:] {
+		if arg == "-daemon" {
+			if i+2 <= len(os.Args)-1 {
+				subcmd := os.Args[i+2]
+				// Collect remaining args (excluding -daemon and subcommand)
+				var extraArgs []string
+				for j := 1; j < len(os.Args); j++ {
+					if os.Args[j] == "-daemon" {
+						j++ // skip subcommand
+						continue
+					}
+					extraArgs = append(extraArgs, os.Args[j])
+				}
+				switch subcmd {
+				case "start":
+					if err := daemon.Start(extraArgs); err != nil {
+						fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+						os.Exit(1)
+					}
+					return
+				case "stop":
+					if err := daemon.Stop(); err != nil {
+						fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+						os.Exit(1)
+					}
+					return
+				case "status":
+					r := daemon.GetStatus()
+					fmt.Println(r.Msg)
+					if r.Status == daemon.StatusError {
+						os.Exit(1)
+					}
+					return
+				default:
+					fmt.Fprintf(os.Stderr, "Unknown daemon subcommand: %q (use start, stop, or status)\n", subcmd)
+					os.Exit(1)
+				}
+			}
+			fmt.Fprintln(os.Stderr, "Usage: -daemon {start|stop|status}")
+			os.Exit(1)
+		}
+	}
+
 	debugFlag := flag.Bool("debug", false, "Enable verbose debug logging")
 	portFlag := flag.String("port", "", "Override SERVER_PORT")
 	hostFlag := flag.String("host", "", "Override SERVER_HOST")
@@ -357,6 +402,9 @@ func main() {
 		}
 	}()
 
+	// Write PID file after server starts listening
+	daemon.WritePID()
+
 	sig := <-quit
 	logger.Warn("Signal %q — draining %d active request(s)…", sig, met.ActiveCount())
 	bgCancel()
@@ -373,5 +421,6 @@ func main() {
 
 	toolRegistry.Save()
 	appMet.SaveScoreCache(scorePath)
+	daemon.RemovePIDFile()
 	logger.Info("Goodbye!  %s", met.Summary())
 }

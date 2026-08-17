@@ -120,7 +120,18 @@ Or use `make cross-build` for all platforms (linux, darwin, windows, android).
 
 # Restrict to specific models only
 ./free-model-router --models "dots-studio/dots-3-note-preview:free,nvidia/nemotron-3.5-lightning:free"
+
+# Run as daemon (background)
+./free-model-router -daemon start
+
+# Check daemon status
+./free-model-router -daemon status
+
+# Stop daemon
+./free-model-router -daemon stop
 ```
+
+Daemon logs are written to `./daemon.log`. PID file is `./free-model-router.pid`.
 
 ## API Endpoints
 

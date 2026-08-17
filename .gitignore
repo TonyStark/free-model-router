@@ -13,6 +13,10 @@ coverage.html
 tool_support_cache.json
 score_cache.json
 
+# Daemon
+*.pid
+daemon.log
+
 # Environment
 .env
 
