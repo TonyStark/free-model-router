@@ -271,7 +271,45 @@ func main() {
 	hostFlag := flag.String("host", "", "Override SERVER_HOST")
 	modelsFlag := flag.String("models", "", "Comma-separated list of allowed models (overrides config)")
 	silentFlag := flag.Bool("s", false, "Suppress all output (silent mode)")
+	daemonFlag := flag.String("daemon", "", "Run as daemon: start, stop, or status")
 	flag.Parse()
+
+	// Handle -daemon after flag.Parse() (for -h and help display)
+	if *daemonFlag != "" {
+		switch *daemonFlag {
+		case "start":
+			var extraArgs []string
+			for _, arg := range os.Args[1:] {
+				if arg == "-daemon" || arg == *daemonFlag {
+					continue
+				}
+				if strings.HasPrefix(arg, "-") {
+					extraArgs = append(extraArgs, arg)
+				}
+			}
+			if err := daemon.Start(extraArgs); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "stop":
+			if err := daemon.Stop(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "status":
+			r := daemon.GetStatus()
+			fmt.Println(r.Msg)
+			if r.Status == daemon.StatusError {
+				os.Exit(1)
+			}
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "Unknown daemon subcommand: %q (use start, stop, or status)\n", *daemonFlag)
+			os.Exit(1)
+		}
+	}
 
 	logger.Init(*debugFlag)
 	if *silentFlag {
